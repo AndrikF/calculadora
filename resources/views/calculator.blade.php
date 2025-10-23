@@ -11,9 +11,9 @@
         html,body{height:100%;margin:0}
         body{display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,#171416,#2a2729);font-family:Segoe UI,Roboto,Arial;color:var(--text)}
         .calc{width:360px;background:var(--panel);border-radius:12px;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,.6)}
-        .display{height:84px;background:#0f0d0e;border-radius:8px;color:var(--text);display:flex;flex-direction:column;justify-content:center;padding:12px 14px;margin-bottom:12px}
-        .small{color:var(--muted);font-size:13px}
-        .big{font-size:40px;text-align:right}
+    .display{height:100px;background:#0f0d0e;border-radius:8px;color:var(--text);display:flex;flex-direction:column;justify-content:center;padding:12px 14px;margin-bottom:12px}
+    .small{color:var(--muted);font-size:13px}
+    .big{font-size:40px;text-align:right;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .pad{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
         button.key{height:56px;border-radius:8px;border:0;background:var(--button);color:var(--text);font-size:18px}
         button.key.op{background:#422f2f}
@@ -69,18 +69,58 @@
         // Simple client-side calculator logic mimicking the Windows layout
         (function(){
             const screen = document.getElementById('screen')
-            
+            const history = document.getElementById('history')
+
             let current = '0', prev = null, op = null, overwrite = false
+            const MAX_CHARS = 14; // visible limit before shrinking or switching to exponential
+
+            function formatDisplayValue(val){
+                if(val === 'Error' || val === 'NaN' || val === 'Infinity') return val
+                const n = Number(val)
+                if(!isFinite(n)) return val
+
+                let s = String(val)
+                const absN = Math.abs(n)
+
+                if(s.length > MAX_CHARS){
+                    if(absN >= 1e12 || (absN > 0 && absN < 1e-6)){
+                        s = n.toExponential(8)
+                    } else {
+                        const intLen = Math.floor(absN).toString().length
+                        const maxDecimals = Math.max(0, MAX_CHARS - intLen - 1)
+                        s = Number(n.toFixed(Math.min(maxDecimals, 8))).toString()
+                        if(s.length > MAX_CHARS) s = n.toExponential(8)
+                    }
+                }
+                return s
+            }
+
+            function adjustFontSize(text){
+                const base = 40; const min = 18
+                const len = String(text).length
+                if(len <= 10) screen.style.fontSize = base + 'px'
+                else {
+                    const extra = Math.min(20, len - 10)
+                    const size = Math.max(min, base - extra * 1.2)
+                    screen.style.fontSize = Math.round(size) + 'px'
+                }
+            }
 
             function update(){
-                screen.textContent = current
+                const shown = formatDisplayValue(current)
+                screen.textContent = shown
+                adjustFontSize(shown)
                 history.textContent = prev ? (prev + (op||'')) : ''
             }
 
             function inputDigit(d){
                 if(overwrite){ current = d; overwrite = false; }
                 else if(current === '0') current = d
-                else current += d
+                else {
+                    if(current.replace('-', '').replace('.', '').length >= 20) return
+                    current += d
+                }
+                if(current.length > 40) current = current.slice(0,40)
                 update()
             }
 
@@ -113,7 +153,9 @@
                     if(b === 0){ current = 'Error'; prev = null; op = null; overwrite = true; return update(); }
                     res = a / b;
                 }
-                current = (Math.round((res + Number.EPSILON) * 1e12)/1e12).toString();
+                // Round result to avoid floating noise and limit length
+                let rounded = Math.round((res + Number.EPSILON) * 1e12)/1e12
+                current = String(rounded)
                 // send to server to store history (best-effort)
                 try {
                     await fetch('{{ url('/api/calc') }}', {
